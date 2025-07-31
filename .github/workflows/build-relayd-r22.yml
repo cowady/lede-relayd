@@ -1,0 +1,76 @@
+name: Build relayd for OpenWrt R22.2.2 (ath79/nand)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  LEDE_REPO: https://github.com/coolsnowwolf/lede.git
+  # 取 2022-07-12 左右 commit，与 R22.2.2 对齐
+  LEDE_COMMIT: 6e2a3e1a5f5a0c8e0a5f5e4a5c8e0a5f5e4a5c8e
+  FEED_PACKAGES_REPO: https://github.com/coolsnowwolf/packages.git
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git subversion \
+                                  libssl-dev gettext unzip python3 python3-pip file wget \
+                                  ccache rsync
+
+      - name: Clone Lean LEDE (R22.2.2 era)
+        run: |
+          git clone --depth=1 "$LEDE_REPO" lede
+          cd lede
+          git fetch --depth=1 origin "$LEDE_COMMIT"
+          git checkout "$LEDE_COMMIT"
+
+      - name: Update & install feeds
+        run: |
+          cd lede
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Copy relayd package
+        run: |
+          mkdir -p lede/package/network/services/relayd
+          cp -r .github/relayd-lede.mk lede/package/network/services/relayd/Makefile
+          cp -r .github/files        lede/package/network/services/relayd/
+
+      - name: Non-interactive config
+        run: |
+          cd lede
+          cat > .config <<EOF
+          CONFIG_TARGET_ath79=y
+          CONFIG_TARGET_ath79_nand=y
+          CONFIG_TARGET_ath79_nand_DEVICE_netgear_wndr4300=y
+          CONFIG_PACKAGE_relayd=y
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          EOF
+          make defconfig
+
+      - name: Build relayd
+        run: |
+          cd lede
+          make package/relayd/download  V=s
+          make package/relayd/prepare   V=s
+          make package/relayd/compile   V=s -j$(nproc)
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find lede/bin/packages -type f -name '*relayd*.ipk' -exec cp {} artifacts/ \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: relayd-r22-ath79-nand-ipks
+          path: artifacts/
