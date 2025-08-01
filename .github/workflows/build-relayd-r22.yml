@@ -1,50 +1,40 @@
-name: Build relayd for OpenWrt R22.2.2 (ath79/nand)
+name: 编译 relayd for WNDR4300 R22.2.2 (ath79/nand)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:          # 手动触发
   push:
     branches: [ main ]
 
 env:
   LEDE_REPO: https://github.com/coolsnowwolf/lede.git
-  # 取 2022-07-12 左右 commit，与 R22.2.2 对齐
+  # 2022-07-12 左右 commit，与 R22.2.2 同步
   LEDE_COMMIT: 6e2a3e1a5f5a0c8e0a5f5e4a5c8e0a5f5e4a5c8e
-  FEED_PACKAGES_REPO: https://github.com/coolsnowwolf/packages.git
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install deps
+      - name: 1. 安装构建依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses5-dev gawk git subversion \
                                   libssl-dev gettext unzip python3 python3-pip file wget \
                                   ccache rsync
 
-      - name: Clone Lean LEDE (R22.2.2 era)
+      - name: 2. 克隆 Lean 源码（与 R22.2.2 同日期）
         run: |
-          git clone --depth=1 "$LEDE_REPO" lede
+          git clone --depth=100 "$LEDE_REPO" lede
           cd lede
-          git fetch --depth=1 origin "$LEDE_COMMIT"
+          git fetch --depth=100 origin "$LEDE_COMMIT"
           git checkout "$LEDE_COMMIT"
 
-      - name: Update & install feeds
+      - name: 3. 更新 feeds
         run: |
           cd lede
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Copy relayd package
-        run: |
-          mkdir -p lede/package/network/services/relayd
-          cp -r .github/relayd-lede.mk lede/package/network/services/relayd/Makefile
-          cp -r .github/files        lede/package/network/services/relayd/
-
-      - name: Non-interactive config
+      - name: 4. 写入非交互配置
         run: |
           cd lede
           cat > .config <<EOF
@@ -57,20 +47,20 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build relayd
+      - name: 5. 仅编译 relayd
         run: |
           cd lede
           make package/relayd/download  V=s
           make package/relayd/prepare   V=s
           make package/relayd/compile   V=s -j$(nproc)
 
-      - name: Collect artifacts
+      - name: 6. 收集产物
         run: |
           mkdir -p artifacts
           find lede/bin/packages -type f -name '*relayd*.ipk' -exec cp {} artifacts/ \;
 
-      - name: Upload artifacts
+      - name: 7. 上传
         uses: actions/upload-artifact@v4
         with:
-          name: relayd-r22-ath79-nand-ipks
+          name: relayd-r22-ath79-nand-ipk
           path: artifacts/
